@@ -115,6 +115,15 @@ services:
       start_period: 30s
     restart: always
 
+  database:
+        image: 'postgres'
+        environment:
+            - POSTGRES_USER=airflow
+            - POSTGRES_PASSWORD=airflow
+            - POSTGRES_DB=airflow
+        ports:
+            - '5423:5423'
+
   airflow-webserver:
     <<: *airflow-common
     command: webserver

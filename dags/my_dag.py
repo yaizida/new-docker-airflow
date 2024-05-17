@@ -10,6 +10,7 @@ from airflow.decorators import dag, task
     catchup=False,
     tags=["ETL"]
 )
+
 def test_task():
     import pandas as pd
 
@@ -45,8 +46,6 @@ def test_task():
         extract_data()
         >> print_data()
     )
-
-    return test_task
 
 
 test_task()
