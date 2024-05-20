@@ -10,7 +10,7 @@ from airflow.decorators import dag, task
     catchup=False,
     tags=["ETL"]
 )
-def test_task():
+def new_test_task():
     import pandas as pd
     import numpy as np
     from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -49,8 +49,26 @@ def test_task():
         from sqlalchemy import (MetaData, Table, Column, String, Integer,
                                 inspect, Float, UniqueConstraint, DateTime)
 
-        hook = PostgresHook(conn_id='my_database')
+        hook = PostgresHook('my_database')
         db_conn = hook.get_sqlalchemy_engine()
+        metadata = MetaData()
+
+        csv_data = Table(
+            'csv_data',
+            metadata,
+            Column('id', Integer, primary_key=True, autoincrement=True),
+            Column('Year', Integer),
+            Column('Industry_aggregation_NZSIOC', String),
+            Column('Industry_code_NZSIOC', Integer),
+            Column('Industry_name_NZSIOC', String),
+            Column('Units', String),
+            Column('Variable_code', String),
+            Column('Variable_name', String),
+            Column('Variable_category', String),
+            Column('Value,Industry_code_ANZSIC06', String)
+        )
+        if not inspect(db_conn).has_table(csv_data.name):
+            metadata.create_all(db_conn)
 
     (
         extract_data()
@@ -59,4 +77,4 @@ def test_task():
     )
 
 
-test_task()
+new_test_task()
