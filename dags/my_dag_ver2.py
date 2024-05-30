@@ -10,7 +10,7 @@ from airflow.decorators import dag, task
     catchup=False,
     tags=["ETL"]
 )
-def test_task():
+def test_task1():
     import pandas as pd
     import numpy as np
     from airflow.providers.postgres.hooks.postgres import PostgresHook

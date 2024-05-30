@@ -10,7 +10,6 @@ from airflow.decorators import dag, task
     catchup=False,
     tags=["ETL"]
 )
-
 def test_task():
     import pandas as pd
 

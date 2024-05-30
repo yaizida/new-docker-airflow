@@ -49,26 +49,26 @@ def new_test_task():
         from sqlalchemy import (MetaData, Table, Column, String, Integer,
                                 inspect, Float, UniqueConstraint, DateTime)
 
-        hook = PostgresHook('my_database')
+        hook = PostgresHook('airflow')
         db_conn = hook.get_sqlalchemy_engine()
         metadata = MetaData()
-
         csv_data = Table(
-            'csv_data',
-            metadata,
-            Column('id', Integer, primary_key=True, autoincrement=True),
-            Column('Year', Integer),
-            Column('Industry_aggregation_NZSIOC', String),
-            Column('Industry_code_NZSIOC', Integer),
-            Column('Industry_name_NZSIOC', String),
-            Column('Units', String),
-            Column('Variable_code', String),
-            Column('Variable_name', String),
-            Column('Variable_category', String),
-            Column('Value,Industry_code_ANZSIC06', String)
+            'csv_data', metadata,
+            Column('id', Integer, primary_key=True),
+            Column('name', String(255)),
+            Column('age', Integer),
+            Column('gender', String(255)),
+            Column('height', Float),
+            Column('weight', Float),
+            Column('created_at', DateTime),
+            UniqueConstraint('name', 'age', 'gender', 'height', 'weight',
+                             name='unique_name_age_gender_height_weight')
+
         )
-        if not inspect(db_conn).has_table(csv_data.name):
-            metadata.create_all(db_conn)
+        if not db_conn.has_table('csv_data'):
+            csv_data.create(db_conn)
+        else:
+            print('Table already exists')
 
     (
         extract_data()

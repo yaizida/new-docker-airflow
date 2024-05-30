@@ -1,0 +1,1 @@
+print('item_id, brand, department, group_stocks, name_stocks, full_price, discount_price, "size", quantity, size_range_type, "style", gender_id, gender, season_id, season, barcode, sku, store_barcode, created, updated'.split(','))
