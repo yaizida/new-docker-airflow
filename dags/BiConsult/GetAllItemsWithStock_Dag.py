@@ -1,32 +1,28 @@
 import os
-import pendulum
-from airflow.decorators import dag, task
 import logging
 import time
 from datetime import datetime, timedelta
-
 import pandas as pd
+from airflow.operators.python import get_current_context
+from airflow.decorators import dag, task
+from airflow.models import Variable
 from suds.client import Client
-
+import pendulum
 CUR_DIR = os.path.abspath(os.path.dirname(__file__))
-
-client = Client('https://sales-ws.farfetch.com/pub/apistock.asmx?wsdl', timeout=30)
-key = '1vSu3k1DvCE='
-
+KEY = '1vSu3k1DvCE='
+client = Client('https://sales-ws.farfetch.com/pub/apistock.asmx?wsdl',
+                timeout=30)
 log = logging.getLogger('suds.client')
 log.setLevel(logging.WARNING)
 handler = logging.FileHandler('detail.log', 'a', 'utf-8')
-handler.setFormatter(logging.Formatter('%(asctime)s-%(levelname)s-%(message)s'))
+handler.setFormatter(logging.Formatter('%(asctime)s-%(levelname)s-%(message)s')) # noqa
 log.addHandler(handler)
-
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
     "retries": 0,
     "retry_delay": timedelta(seconds=5)
 }
-
-
 @dag(
     dag_id='GetAllItemsWithStock',
     default_args=default_args,
@@ -37,82 +33,29 @@ default_args = {
     max_active_runs=1,
     tags=['FarFetch'],
 )
-def FarFetchGetAllItemsWithStock():
-
+# FarFetchGetAllItemsWithStock
+def farfetch_gettAll_withStock():
+    # GetAllItemsWithStock
     @task
-    def GetAllItemsWithStock():
-
-        def Request(key):
-            df = pd.DataFrame()
-            response = client.service.GetAllItemsWithStock(key)
-
-            header = []
-            for j in response.GetAllItemsWithStockResult.diffgram[0].DocumentElement[0].Table[0]:
-                header.append(j[0])
-
-            body = []
-            for s in range(len(response.GetAllItemsWithStockResult.diffgram[0].DocumentElement[0].Table)):
-                print(s)
-                row = []
-                for j in response.GetAllItemsWithStockResult.diffgram[0].DocumentElement[0].Table[s]:
-                    if type(j[1]) is list:
-                        row.append(str(j[1][0]))
-                    else:
-                        row.append(str(j[1]))
-                body.append(row)
-                df = pd.DataFrame(body, columns=header)
-
-            directory_path = f'{CUR_DIR}/resources/Dictionary'
-
-            if not os.path.exists(directory_path):
-                os.makedirs(directory_path)
-            else:
-                print("Директория '%s' уже существует." % directory_path)
-
-            file_path = f'{CUR_DIR}/resources/Dictionary/items_{datetime.now().date()}.csv'
-            df.drop_duplicates().to_csv(file_path, encoding='utf-8', index=False)
-
-        errorcount = 1
-        while errorcount <= 6:
-            try:
-                time.sleep(0.5)
-                Request(key)
-                time.sleep(0.5)
-                break
-            except Exception as e:
-                if errorcount == 6:
-                    print(
-                        f'============Error============ \n Ошибка произошла в период загрузки справочника позиций  \n {e} \n'
-                        f'=============================')
-                else:
-                    print(f'Попытка {errorcount} для справочника позиций ')
-                errorcount = errorcount + 1
-
-    @task
-    def latest_file(**kwargs):
-        ti = kwargs['ti']
-        directory = f'{CUR_DIR}/resources/Dictionary'
-        latest_file = None
-        latest_timestamp = 0
-        print('__' * 30)
-        print(directory)
-        for filename in os.listdir(directory):
-            filepath = os.path.join(directory, filename)
-            if os.path.isfile(filepath):
-                timestamp = os.path.getmtime(filepath)
-                if timestamp > latest_timestamp:
-                    latest_timestamp = timestamp
-                    latest_file = filepath
-        df = pd.read_csv(latest_file)
-        print(df.info())
-        ti.xcom_push(key='load_csv_posgres', value=latest_file)
-
+    def get_all_items_wStock(**kwargs):
+        response = client.service.GetAllItemsWithStock(KEY)
+        data = response.GetAllItemsWithStockResult.diffgram[0].DocumentElement[0].Table # noqa
+        header = [x[0] for x in data[0]]
+        body = [[str(j[1][0] if isinstance(j[1], list)
+                 else str(j[1])) for j in row]for row in data]
+        df = pd.DataFrame(body, columns=header)
+        
+        logging.info(f'Дата фрейм: {df.head()}')
+        kwargs['ti'].xcom_push(key='db_load', value=df)
+        
+    
     @task
     def transform(**kwargs):
         ti = kwargs['ti']
-        latest_file = ti.xcom_pull(task_ids='latest_file',
-                                   key='load_csv_posgres')
-        df = pd.read_csv(latest_file)
+        df = ti.xcom_pull(task_ids='get_all_items_wStock',
+                                   key='db_load')
+        logging.info('Дата фрейм ' +
+                     f'Пришёл в слеующем виде: {df}')
         df = df.drop(['_id', '_rowOrder'], axis=1)
         bd_columns = ['item_id', 'brand', 'department', 'group_stocks',
                       'name_stocks', 'full_price', 'discount_price', '"size"',
@@ -120,24 +63,45 @@ def FarFetchGetAllItemsWithStock():
                       'gender', 'season_id', 'season', 'barcode', 'sku',
                       'store_barcode', 'created', 'updated']
         columns_names = df.columns.tolist()
-        renamed_df = df.rename(columns=dict(zip(columns_names, bd_columns)))
-        file_path = f'{CUR_DIR}/resources/Dictionary/transform_items_{datetime.now().date()}.csv'
-        renamed_df.drop_duplicates().to_csv(file_path, encoding='utf-8', index=False)
-        ti.xcom_push(key='db_load', value=file_path)
+        df = df.rename(columns=dict(zip(columns_names, bd_columns)))
+        print(df.info())
+        df['department'] = df['department'].astype(str)
+        df['group_stocks'] = df['group_stocks'].astype(str)
+        df['full_price'] = df['full_price'].astype(str)
+        df['discount_price'] = df['discount_price'].astype(str)
+        df['"style"'] = df['"style"'].astype(str)
+        df['gender'] = df['gender'].astype(str)
+        df['barcode'] = df['barcode'].astype(str)
+        df['sku'] = df['sku'].astype(str)
+        df['store_barcode'] = df['store_barcode'].astype(str)
+        df[['created', 'updated']] = None
+        df['created'] = pd.to_datetime(df['created'])  # Преобразование в datetime
+        df['updated'] = pd.to_datetime(df['updated'])  # Преобразование в datetime
+        df['updates'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + "000"
+        ti.xcom_push(key='db_load', value=df)
+
 
     @task
     def db_load(**kwargs):
-        ti = kwargs['ti']
-        db_load = ti.xcom_pull(task_ids='transform', key='db_load')
-        df = pd.read_csv(db_load)
-        print(df.info())
+
+        from airflow.providers.postgres.hooks.postgres import PostgresHook
+
+        df = kwargs['ti'].xcom_pull(task_ids='transform', key='db_load')
+        hook = PostgresHook('airflowdb')
+        conn = hook.get_conn()
+        cursor = conn.cursor()
+        logging.info(f'Созданный датафрейм: {df.head()}')
+        cursor.execute("SELECT schema_name FROM information_schema.schemata;")
+        logging.info('Execute выполнился')
+        db_df = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
+        logging.info(f'БД датафрейм  {db_df.head()}')
+        cursor.close()
+        conn.close()
 
     (
-        GetAllItemsWithStock() >>
-        latest_file() >>
+        get_all_items_wStock() >>
         transform() >>
         db_load()
     )
 
-
-FarFetchGetAllItemsWithStock()
+farfetch_gettAll_withStock()
