@@ -71,9 +71,9 @@ def FarFetchGetAllItemsWithStock():
             else:
                 print("Директория '%s' уже существует." % directory_path)
 
-            file_path = f'{CUR_DIR}/resources/Dictionary/items_{datetime.now().date()}.csv'
-            df.drop_duplicates().to_csv(file_path, encoding='utf-8', index=False)
-            print(df.info())
+            # file_path = f'{CUR_DIR}/resources/Dictionary/items_{datetime.now().date()}.csv'
+            # df.drop_duplicates().to_csv(file_path, encoding='utf-8', index=False)
+            # print(df.info())
             return df
 
         errorcount = 1
