@@ -28,6 +28,8 @@ default_args = {
     "retries": 0,
     "retry_delay": timedelta(seconds=5)
 }
+
+
 @dag(
     dag_id='GetAllItemsWithStock',
     default_args=default_args,
@@ -52,7 +54,6 @@ def farfetch_gettAll_withStock():
 
         logging.info(f'Дата фрейм: {df.head()}')
         kwargs['ti'].xcom_push(key='db_load', value=df)
-
 
     @task
     def transform(**kwargs):
