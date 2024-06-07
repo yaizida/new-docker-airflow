@@ -3,32 +3,38 @@ import os
 import logging
 import time
 from datetime import datetime, timedelta
+<<<<<<< HEAD
 
 import pendulum
+=======
+>>>>>>> 9204747347721db918b307f60a8d998249241a99
 import pandas as pd
+from airflow.operators.python import get_current_context
+from airflow.decorators import dag, task
+from airflow.models import Variable
 from suds.client import Client
+<<<<<<< HEAD
 from airflow.decorators import dag, task
 
 
+=======
+import pendulum
+>>>>>>> 9204747347721db918b307f60a8d998249241a99
 CUR_DIR = os.path.abspath(os.path.dirname(__file__))
-
-client = Client('https://sales-ws.farfetch.com/pub/apistock.asmx?wsdl', timeout=30)
-key = '1vSu3k1DvCE='
-
+KEY = '1vSu3k1DvCE='
+client = Client('https://sales-ws.farfetch.com/pub/apistock.asmx?wsdl',
+                timeout=30)
 log = logging.getLogger('suds.client')
 log.setLevel(logging.WARNING)
 handler = logging.FileHandler('detail.log', 'a', 'utf-8')
-handler.setFormatter(logging.Formatter('%(asctime)s-%(levelname)s-%(message)s'))
+handler.setFormatter(logging.Formatter('%(asctime)s-%(levelname)s-%(message)s')) # noqa
 log.addHandler(handler)
-
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
     "retries": 0,
     "retry_delay": timedelta(seconds=5)
 }
-
-
 @dag(
     dag_id='GetAllItemsWithStock',
     default_args=default_args,
@@ -39,9 +45,11 @@ default_args = {
     max_active_runs=1,
     tags=['FarFetch'],
 )
-def FarFetchGetAllItemsWithStock():
-
+# FarFetchGetAllItemsWithStock
+def farfetch_gettAll_withStock():
+    # GetAllItemsWithStock
     @task
+<<<<<<< HEAD
     def GetAllItemsWithStock(**kwargs):
 
         def Request(key):
@@ -102,6 +110,27 @@ def FarFetchGetAllItemsWithStock():
         df = ti.xcom_pull(task_ids='GetAllItemsWithStock',
                                    key='db_load')
         print(df)
+=======
+    def get_all_items_wStock(**kwargs):
+        response = client.service.GetAllItemsWithStock(KEY)
+        data = response.GetAllItemsWithStockResult.diffgram[0].DocumentElement[0].Table # noqa
+        header = [x[0] for x in data[0]]
+        body = [[str(j[1][0] if isinstance(j[1], list)
+                 else str(j[1])) for j in row]for row in data]
+        df = pd.DataFrame(body, columns=header)
+        
+        logging.info(f'Дата фрейм: {df.head()}')
+        kwargs['ti'].xcom_push(key='db_load', value=df)
+        
+    
+    @task
+    def transform(**kwargs):
+        ti = kwargs['ti']
+        df = ti.xcom_pull(task_ids='get_all_items_wStock',
+                                   key='db_load')
+        logging.info('Дата фрейм ' +
+                     f'Пришёл в слеующем виде: {df}')
+>>>>>>> 9204747347721db918b307f60a8d998249241a99
         df = df.drop(['_id', '_rowOrder'], axis=1)
         bd_columns = ['item_id', 'brand', 'department', 'group_stocks',
                       'name_stocks', 'full_price', 'discount_price', '"size"',
@@ -123,7 +152,13 @@ def FarFetchGetAllItemsWithStock():
         df[['created', 'updated']] = None
         df['created'] = pd.to_datetime(df['created'])  # Преобразование в datetime
         df['updated'] = pd.to_datetime(df['updated'])  # Преобразование в datetime
+<<<<<<< HEAD
         ti.xcom_push(key='db_load', value=df)
+=======
+        df['updates'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + "000"
+        ti.xcom_push(key='db_load', value=df)
+
+>>>>>>> 9204747347721db918b307f60a8d998249241a99
 
     @task
     def db_load(**kwargs):
@@ -134,6 +169,7 @@ def FarFetchGetAllItemsWithStock():
         hook = PostgresHook('airflowdb')
         conn = hook.get_conn()
         cursor = conn.cursor()
+<<<<<<< HEAD
 
         with io.StringIO() as csv_buffer:
             df.to_csv(csv_buffer, header=False, index=False, sep='\t')
@@ -152,9 +188,20 @@ def FarFetchGetAllItemsWithStock():
 
     (
         GetAllItemsWithStock() >>
+=======
+        logging.info(f'Созданный датафрейм: {df.head()}')
+        cursor.execute("SELECT schema_name FROM information_schema.schemata;")
+        logging.info('Execute выполнился')
+        db_df = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
+        logging.info(f'БД датафрейм  {db_df.head()}')
+        cursor.close()
+        conn.close()
+
+    (
+        get_all_items_wStock() >>
+>>>>>>> 9204747347721db918b307f60a8d998249241a99
         transform() >>
         db_load()
     )
 
-
-FarFetchGetAllItemsWithStock()
+farfetch_gettAll_withStock()
