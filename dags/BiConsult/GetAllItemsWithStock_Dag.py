@@ -7,12 +7,15 @@ from datetime import datetime, timedelta
 import pendulum
 import pandas as pd
 from airflow.operators.python import get_current_context
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.decorators import dag, task
 from airflow.models import Variable
 from suds.client import Client
 from airflow.decorators import dag, task
 
 
+POSTGRES_CONN_ID = ''
+TABLE_NAME = ''
 CUR_DIR = os.path.abspath(os.path.dirname(__file__))
 KEY = '1vSu3k1DvCE='
 client = Client('https://sales-ws.farfetch.com/pub/apistock.asmx?wsdl',
@@ -53,61 +56,135 @@ def farfetch_gettAll_withStock():
         df = pd.DataFrame(body, columns=header)
 
         logging.info(f'Дата фрейм: {df.head()}')
-        kwargs['ti'].xcom_push(key='db_load', value=df)
+        return df
 
     @task
-    def transform(**kwargs):
-        ti = kwargs['ti']
-        df = ti.xcom_pull(task_ids='get_all_items_wStock',
-                                   key='db_load')
-        logging.info('Дата фрейм ' +
-                     f'Пришёл в слеующем виде: {df}')
-        df = df.drop(['_id', '_rowOrder'], axis=1)
-        bd_columns = ['item_id', 'brand', 'department', 'group_stocks',
-                      'name_stocks', 'full_price', 'discount_price', '"size"',
-                      'quantity', 'size_range_type', '"style"', 'gender_id',
-                      'gender', 'season_id', 'season', 'barcode', 'sku',
-                      'store_barcode', 'created', 'updated']
-        columns_names = df.columns.tolist()
-        df = df.rename(columns=dict(zip(columns_names, bd_columns)))
-        print(df.info())
-        df['department'] = df['department'].astype(str)
-        df['group_stocks'] = df['group_stocks'].astype(str)
-        df['full_price'] = df['full_price'].astype(str)
-        df['discount_price'] = df['discount_price'].astype(str)
-        df['"style"'] = df['"style"'].astype(str)
-        df['gender'] = df['gender'].astype(str)
-        df['barcode'] = df['barcode'].astype(str)
-        df['sku'] = df['sku'].astype(str)
-        df['store_barcode'] = df['store_barcode'].astype(str)
-        df[['created', 'updated']] = None
-        df['created'] = pd.to_datetime(df['created'])  # Преобразование в datetime
-        df['updated'] = pd.to_datetime(df['updated'])  # Преобразование в datetime
-        df['updates'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + "000"
-        ti.xcom_push(key='db_load', value=df)
+    def fetch_db_data():
+        """Получает данные из PostgreSQL."""
+        pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+        df = pg_hook.get_pandas_df(sql=f"SELECT * FROM {TABLE_NAME}")
+        return df
+
 
     @task
-    def db_load(**kwargs):
+    def compare_and_update_data(api_df: pd.DataFrame, db_df: pd.DataFrame):
+        """Сравнивает DataFrame и обновляет базу данных."""
 
-        from airflow.providers.postgres.hooks.postgres import PostgresHook
+        common_cols = ["ItemID"]
+        # Совместим df для сравнения
+        merged_df = api_df.merge(
+            db_df,
+            on=common_cols,
+            how="left",
+            suffixes=("_api", "_db"),
+        )
 
-        df = kwargs['ti'].xcom_pull(task_ids='transform', key='db_load')
-        hook = PostgresHook('airflowdb')
-        conn = hook.get_conn()
-        cursor = conn.cursor()
-        logging.info(f'Созданный датафрейм: {df.head()}')
-        cursor.execute("SELECT schema_name FROM information_schema.schemata;")
-        logging.info('Execute выполнился')
-        db_df = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
-        logging.info(f'БД датафрейм  {db_df.head()}')
-        cursor.close()
-        conn.close()
+        # Новые записи: записи, которые есть в API, но отсутствуют в базе
+        new_records = merged_df[merged_df["ItemID_db"].isnull()]
+        if not new_records.empty:
+            logging.info(f"Найдены {len(new_records)} новых записей.")
+            # Добавьте столбцы для created и updated
+            new_records["created"] = datetime.now()
+            new_records["updated"] = datetime.now()
+            # Преобразование данных
+            new_records["item_id"] = pd.to_numeric(new_records["ItemID"])
+            new_records["quantity"] = pd.to_numeric(new_records["Quantity"])
+            new_records["gender_id"] = pd.to_numeric(new_records["GenderID"])
+            new_records["season_id"] = pd.to_numeric(new_records["SeasonID"])
+            # Выберите нужные столбцы для вставки
+            insert_cols = [
+                "item_id",
+                "brand",
+                "department",
+                "group_stocks",
+                "name_stocks",
+                "full_price",
+                "discount_price",
+                "size",
+                "quantity",
+                "size_range_type",
+                "style",
+                "gender_id",
+                "gender",
+                "season_id",
+                "season",
+                "barcode",
+                "sku",
+                "store_barcode",
+                "created",
+                "updated",
+            ]
+            # Вставьте новые записи в базу данных
+            pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+            pg_hook.insert_rows(
+                table=TABLE_NAME, rows=new_records[insert_cols].values.tolist()
+            )
 
-    (
-        get_all_items_wStock() >>
-        transform() >>
-        db_load()
-    )
+        # Измененные записи: записи, которые есть в API и в базе, но значения отличаются
+        changed_records = merged_df[
+            (merged_df["ItemID_db"].notnull())
+            & (
+                (merged_df["Brand_api"] != merged_df["Brand_db"])
+                | (merged_df["Department_api"] != merged_df["Department_db"])
+                | (merged_df["Group_api"] != merged_df["Group_db"])
+                | (merged_df["Name_api"] != merged_df["Name_db"])
+                | (merged_df["FullPrice_api"] != merged_df["FullPrice_db"])
+                | (merged_df["DiscountPrice_api"] != merged_df["DiscountPrice_db"])
+                | (merged_df["Size_api"] != merged_df["Size_db"])
+                | (merged_df["Quantity_api"] != merged_df["Quantity_db"])
+                | (merged_df["SizeRangeType_api"] != merged_df["SizeRangeType_db"])
+                | (merged_df["Style_api"] != merged_df["Style_db"])
+                | (merged_df["GenderID_api"] != merged_df["GenderID_db"])
+                | (merged_df["Gender_api"] != merged_df["Gender_db"])
+                | (merged_df["SeasonID_api"] != merged_df["SeasonID_db"])
+                | (merged_df["Season_api"] != merged_df["Season_db"])
+                | (merged_df["Barcode_api"] != merged_df["Barcode_db"])
+                | (merged_df["SKU_api"] != merged_df["SKU_db"])
+                | (merged_df["StoreBarcode_api"] != merged_df["StoreBarcode_db"])
+            )
+        ]
+        if not changed_records.empty:
+            logging.info(f"Найдены {len(changed_records)} измененных записей.")
+            # Обновите записи в базе данных
+            pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+            for index, row in changed_records.iterrows():
+                update_query = f"""
+                    UPDATE {TABLE_NAME}
+                    SET brand = %s, department = %s, group_stocks = %s, name_stocks = %s,
+                        full_price = %s, discount_price = %s, "size" = %s, quantity = %s,
+                        size_range_type = %s, "style" = %s, gender_id = %s, gender = %s,
+                        season_id = %s, season = %s, barcode = %s, sku = %s, store_barcode = %s,
+                        updated = %s
+                    WHERE item_id = %s;
+                """
+                pg_hook.run(
+                    update_query,
+                    (
+                        row["Brand_api"],
+                        row["Department_api"],
+                        row["Group_api"],
+                        row["Name_api"],
+                        row["FullPrice_api"],
+                        row["DiscountPrice_api"],
+                        row["Size_api"],
+                        row["Quantity_api"],
+                        row["SizeRangeType_api"],
+                        row["Style_api"],
+                        row["GenderID_api"],
+                        row["Gender_api"],
+                        row["SeasonID_api"],
+                        row["Season_api"],
+                        row["Barcode_api"],
+                        row["SKU_api"],
+                        row["StoreBarcode_api"],
+                        datetime.now(),
+                        row["ItemID_api"],
+                    ),
+                )
+
+    api_data = get_all_items_wStock()
+    db_data = fetch_db_data()
+    compare_and_update_data(api_data, db_data)
 
 
 farfetch_gettAll_withStock()
