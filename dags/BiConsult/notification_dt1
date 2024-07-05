@@ -1,0 +1,28 @@
+from airflow.providers.smtp.hooks.smtp import SmtpHook
+
+from dataclasses import dataclass
+
+@dataclass
+class EmaiAlertMsg:
+    layer: str
+    name_dag: str 
+    func_name: str
+    error: str = None
+    email_subject: str = None
+    email_body:str = None
+
+    def send_email(self):
+        if self.error:
+            self.email_subject = f'Ошибка в {self.layer} DAG - {self.name_dag} Функция - {self.func_name}'
+            self.email_body = f'Подробности об ошибке: {error}'
+        
+        else:
+            self.email_subject = f'Успешно выпонено {self.layer} DAG - {self.name_dag} Функция - {self.func_name}'
+            self.email_body = 'Ошибок нет'
+
+        SmtpHook(smtp_conn_id='smpt_conn'
+            ).send_email_smtp(to=['<email>'],
+                              from_email='airflow@12storeez.com',
+                              subject=self.email_subject,
+                              html_content=self.email_body)
+
