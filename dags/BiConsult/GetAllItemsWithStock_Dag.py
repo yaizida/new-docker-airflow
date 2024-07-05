@@ -79,6 +79,8 @@ def farfetch_gettAll_withStock():
         import inspect
         from notification_dt1 import EmailAlertMsg
 
+        function_name = inspect.stack()[1].function 
+      
         db_df = PG_HOOK.get_pandas_df(sql=f"SELECT * FROM {TABLE_NAME}")
         api_df['combined_key'] = api_df['id'].astype(str) + api_df['Size']
         db_df['combined_key'] = db_df['id'].astype(str) + db_df['Size']
@@ -127,7 +129,6 @@ def farfetch_gettAll_withStock():
         except Exception as error:
             conn.rollback()
             error = error
-            function_name = inspect.stack()[1].function 
             logging.error(f"{LAYER}.{NAME_DAG}.{function_name} Ошибка при копировании данных: {error}")
           
         EmailAlertMsg(LAYER, NAME_DAG, function_name,  error).send_email()
