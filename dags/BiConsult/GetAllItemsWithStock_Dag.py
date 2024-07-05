@@ -18,8 +18,8 @@ from airflow.decorators import dag, task
 
 
 POSTGRES_CONN_ID = 'airflowdb'
-TABLE_NAME = 'ods.items'
-KEY = '1vSu3k1DvCE='
+TABLE_NAME = '***'
+KEY = '***'
 PG_HOOK = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
 LAYER, NAME_DAG = os.path.realpath(__file__).split('\\')[-2:]
 
